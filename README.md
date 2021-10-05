@@ -6,4 +6,4 @@ To run the tests, do:
 
 To run the benchmarks, do:
 
-    make benchmark
+    make bench
