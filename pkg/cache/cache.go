@@ -1,8 +1,8 @@
 package cache
 
 import (
+	"container/list"
 	"log"
-	"math"
 )
 
 type Stats struct {
@@ -12,14 +12,14 @@ type Stats struct {
 }
 
 type Entry struct {
+	key   int
 	value int
-	seq   int
 }
 
 type Lru struct {
-	m       map[int]*Entry
+	lruMap  map[int]*list.Element // map key -> element on the lruList
+	lruList *list.List            // list of Entry ptrs, most recently accessed at front of list
 	maxSize int
-	nextSeq int
 	stats   Stats
 }
 
@@ -30,70 +30,58 @@ func NewLru(maxSize int) *Lru {
 	}
 
 	return &Lru{
-		m:       make(map[int]*Entry),
+		lruMap:  make(map[int]*list.Element),
+		lruList: list.New(),
 		maxSize: maxSize,
 	}
 }
 
 func (l *Lru) Put(key, value int) {
 
-	entry, ok := l.m[key]
+	element, ok := l.lruMap[key]
 
-	// if key exists, update LRU sequence number
+	// if key exists, move element to front of list (now most recently accessed)
 
 	if ok {
-		entry.seq = l.nextSeq
-		l.nextSeq += 1
+		l.lruList.MoveToFront(element)
 		return
 	}
 
 	// key not found, add new entry
 
-	l.m[key] = &Entry{
-		value: value,
-		seq:   l.nextSeq,
-	}
-	l.nextSeq += 1
+	l.lruMap[key] = l.lruList.PushFront(&Entry{key, value})
 
 	// return if space available
 
-	if len(l.m) <= l.maxSize {
+	if len(l.lruMap) <= l.maxSize {
 		return
 	}
 
-	// no space available, find and evict least recently used
+	// exceeded max size, evict least recently used (found at back of list)
 
-	var lowKey int
-	lowSeq := math.MaxInt
-	for k, entry := range l.m {
-		if entry.seq < lowSeq {
-			lowSeq = entry.seq
-			lowKey = k
-		}
-	}
+	ev := l.lruList.Remove(l.lruList.Back())
+	delete(l.lruMap, ev.(*Entry).key)
 
-	delete(l.m, lowKey)
 	l.stats.Evictions += 1
 }
 
 func (l *Lru) Get(key int) int {
 
-	entry, ok := l.m[key]
+	element, ok := l.lruMap[key]
 
-	// return failure if not in cache
+	// return failure if not found in cache
 
 	if !ok {
 		l.stats.Misses += 1
 		return -1
 	}
 
-	// return cached value
+	// move element to front of list (now most recently accessed)
 
-	entry.seq = l.nextSeq
-	l.nextSeq += 1
+	l.lruList.MoveToFront(element)
+
 	l.stats.Hits += 1
-
-	return entry.value
+	return element.Value.(*Entry).value
 }
 
 func (l *Lru) GetStats() Stats {
